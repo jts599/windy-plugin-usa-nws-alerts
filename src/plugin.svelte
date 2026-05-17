@@ -54,9 +54,9 @@
 <script lang="ts">
     import bcast from '@windy/broadcast';
     import { map } from '@windy/map';
+    import { emitter as pickerEmitter, pickerDot } from '@windy/picker';
     import { isMobileOrTablet } from '@windy/rootScope';
     import { onDestroy, onMount } from 'svelte';
-    import { singleclick } from '@windy/singleclick';
     import { get as getReverseName } from '@windy/reverseName';
     import AlertControls from './components/AlertControls.svelte';
     import AlertDetail from './components/AlertDetail.svelte';
@@ -70,12 +70,9 @@
         addAlertToMap,
         configureAlertLayers,
         highlightAlertLayers,
-        locationFromClickEvent,
         removeAlertFromMap,
         removeAllAlertLayers,
-        removeSelectedLocationMarker,
         unHighlightAlertLayers,
-        updateSelectedLocationMarker,
     } from './scripts/mapLayers';
     import {
         displayedAlertFromNwsAlert,
@@ -85,7 +82,7 @@
     import type { NWSAlert } from './nws';
     import type { AlertFilterState, DisplayedAlert, SelectedLocation, ZoneGeometryData } from './scripts/alertTypes';
 
-    const { name, title } = config;
+    const { title } = config;
     const REVERSE_NAME_ZOOMS = [13, 11, 9, 7];
     const SECOND_MS = 1000;
     const MINUTE_MS = 60 * SECOND_MS;
@@ -103,7 +100,6 @@
     let selectedAlert: DisplayedAlert | null = null;
     let selectedLocation: SelectedLocation | null = null;
     let selectedLocationLabel = 'selected location';
-    let selectedLocationMarker: L.Marker | null = null;
     let locationNameRequestId = 0;
     let lastRefresh: Date | null = null;
     let timeAgo = '...';
@@ -111,6 +107,8 @@
     let pluginElement: HTMLElement | null = null;
     let scrollBodyMaxHeight = 'none';
     let showFilters = false;
+    let pickerOpenedSubscriptionId: number | null = null;
+    let pickerMovedSubscriptionId: number | null = null;
 
     /** Loads NWS alerts, renders their map layers, and reapplies current filters. */
     async function loadAlerts(): Promise<void> {
@@ -149,7 +147,6 @@
             configureAlertLayers(alert, {
                 onMouseOver: highlightAlert,
                 onMouseOut: unHighlightAlert,
-                onClick: handleMapClick,
             });
             addAlertToMap(alert, map);
             alerts.push(alert);
@@ -193,24 +190,28 @@
         displayedAlerts = nextDisplayedAlerts;
     }
 
-    /** Handles Windy singleclick events while the plugin is open. */
-    function handleMapClick(ev: unknown): void {
-        console.log('NWS alerts map click event', ev);
-        const location = locationFromClickEvent(ev);
-        if (location) {
-            selectLocation(location);
-        }
-    }
-
-    /** Selects a clicked map position and updates the visible alert list. */
+    /** Selects the current Windy picker position and updates the visible alert list. */
     function selectLocation(location: SelectedLocation): void {
         clearHighlightedAlerts();
         selectedLocation = { ...location };
         selectedLocationLabel = formatSelectedLocationCoords(location);
         selectedAlert = null;
-        selectedLocationMarker = updateSelectedLocationMarker(map, selectedLocationMarker, location);
         updateDisplayedAlertsForLocation();
         loadSelectedLocationName(location);
+    }
+
+    /** Applies a Windy picker event location when it includes usable coordinates. */
+    function handlePickerLocation(params: { lat?: unknown; lon?: unknown }): void {
+        if (typeof params.lat === 'number' && typeof params.lon === 'number') {
+            selectLocation({ lat: params.lat, lon: params.lon });
+        }
+    }
+
+    /** Uses the current picker dot position for plugin reopen cases before a new picker event fires. */
+    function syncCurrentPickerLocation(): void {
+        if (typeof pickerDot.lat === 'number' && typeof pickerDot.lon === 'number') {
+            selectLocation({ lat: pickerDot.lat, lon: pickerDot.lon });
+        }
     }
 
     /** Selects a visible alert row for detail rendering. */
@@ -330,22 +331,28 @@
 
     export const onopen = () => {
         loadAlerts();
+        syncCurrentPickerLocation();
     };
 
     onMount(() => {
-        singleclick.on(name, handleMapClick);
+        pickerOpenedSubscriptionId = pickerEmitter.on('pickerOpened', handlePickerLocation);
+        pickerMovedSubscriptionId = pickerEmitter.on('pickerMoved', handlePickerLocation);
+        syncCurrentPickerLocation();
         updateScrollBodyMaxHeight();
         window.addEventListener('resize', updateScrollBodyMaxHeight);
         window.visualViewport?.addEventListener('resize', updateScrollBodyMaxHeight);
     });
 
     onDestroy(() => {
-        singleclick.off(name, handleMapClick);
+        if (pickerOpenedSubscriptionId !== null) {
+            pickerEmitter.off(pickerOpenedSubscriptionId);
+        }
+        if (pickerMovedSubscriptionId !== null) {
+            pickerEmitter.off(pickerMovedSubscriptionId);
+        }
         window.removeEventListener('resize', updateScrollBodyMaxHeight);
         window.visualViewport?.removeEventListener('resize', updateScrollBodyMaxHeight);
         removeAllMapFeatures();
-        removeSelectedLocationMarker(map, selectedLocationMarker);
-        selectedLocationMarker = null;
         clearInterval(lastUpdatedRefreshInterval);
     });
 </script>

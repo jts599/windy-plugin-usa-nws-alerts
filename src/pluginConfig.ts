@@ -12,7 +12,6 @@ const config: ExternalPluginConfig = {
     mobileUI: 'small',
     desktopWidth: 400,
     routerPath: '/usa-nws-alerts',
-    listenToSingleclick: true,
 };
 
 export default config;
