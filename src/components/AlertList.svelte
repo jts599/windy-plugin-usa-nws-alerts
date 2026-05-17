@@ -1,6 +1,6 @@
 {#if !selectedLocation}
     <div class="empty-state size-s">
-        Click a position on the map to show active alerts for that location.
+        Open the Windy picker to show active alerts for that location.
     </div>
 {:else if displayedAlerts.length === 0}
     <div class="empty-state size-s">
